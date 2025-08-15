@@ -259,3 +259,87 @@ async def predict(request: PredictionRequest):
         confidence = get_prediction_confidence(model, processed_features)
         
         # Format prediction
+        if isinstance(prediction, np.ndarray):
+            if len(prediction) == 1:
+                prediction = prediction[0]
+            else:
+                prediction = prediction.tolist()
+        
+        return PredictionResponse(
+            prediction=prediction,
+            model_name=request.model_name,
+            prediction_time=datetime.now().isoformat(),
+            confidence=confidence
+        )
+        
+    except Exception as e:
+        logger.error(f"Prediction error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
+
+@app.post("/predict/batch", response_model=PredictionResponse)
+async def predict_batch(request: BatchPredictionRequest):
+    """Make batch predictions"""
+    if request.model_name not in models_cache:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Model '{request.model_name}' not found"
+        )
+    
+    try:
+        model_info = models_cache[request.model_name]
+        model = model_info["model"]
+        
+        # Process batch features
+        processed_features = []
+        for features in request.features_batch:
+            processed = preprocess_features(features, request.model_name)
+            processed_features.append(processed.flatten())
+        
+        processed_features = np.array(processed_features)
+        
+        # Make batch predictions
+        predictions = model.predict(processed_features)
+        
+        # Convert to list for JSON serialization
+        if isinstance(predictions, np.ndarray):
+            predictions = predictions.tolist()
+        
+        return PredictionResponse(
+            prediction=predictions,
+            model_name=request.model_name,
+            prediction_time=datetime.now().isoformat()
+        )
+        
+    except Exception as e:
+        logger.error(f"Batch prediction error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Batch prediction failed: {str(e)}")
+
+@app.post("/models/{model_name}/reload")
+async def reload_model(model_name: str, background_tasks: BackgroundTasks):
+    """Reload a specific model"""
+    if model_name not in models_cache:
+        raise HTTPException(status_code=404, detail=f"Model '{model_name}' not found")
+    
+    def reload_task():
+        try:
+            # This would need to be implemented based on your model storage
+            logger.info(f"Reloading model: {model_name}")
+            # reload logic here
+        except Exception as e:
+            logger.error(f"Failed to reload {model_name}: {str(e)}")
+    
+    background_tasks.add_task(reload_task)
+    return {"message": f"Model '{model_name}' reload initiated"}
+
+# Custom exception handlers
+@app.exception_handler(ValueError)
+async def value_error_handler(request, exc):
+    return HTTPException(status_code=400, detail=str(exc))
+
+@app.exception_handler(FileNotFoundError)
+async def file_not_found_handler(request, exc):
+    return HTTPException(status_code=404, detail="Model file not found")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
