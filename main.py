@@ -188,6 +188,15 @@ def get_prediction_confidence(model, features):
 
 # API Routes
 
+
+@app.post('/suma')
+async def suma(a:int, b:int):
+    return {
+        "message": "Esto es una suma",
+        "result": a+b
+    }
+    
+
 @app.get("/", response_model=Dict[str, str])
 async def root():
     """Root endpoint"""
