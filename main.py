@@ -1,354 +1,117 @@
-# FastAPI ML Model Template
-# Run with: uvicorn main:app --reload
-
-from fastapi import FastAPI, HTTPException, BackgroundTasks
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
-from typing import Dict, List, Any, Optional, Union
+import os
 import joblib
-import pickle
-import json
-import numpy as np
 import pandas as pd
 from pathlib import Path
-import logging
 from datetime import datetime
-import asyncio
-from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
+from typing import Dict
+import logging
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Global variable to store loaded models
-models_cache = {}
+MODEL_PATH = Path("titanic_model.pkl")
 
-# Model loading functions
-def load_model(model_path: str, model_type: str = "sklearn"):
-    """Load a model from file based on its type"""
-    try:
-        if model_type == "sklearn":
-            return joblib.load(model_path)
-        elif model_type == "pickle":
-            with open(model_path, 'rb') as f:
-                return pickle.load(f)
-        elif model_type == "tensorflow":
-            import tensorflow as tf
-            return tf.keras.models.load_model(model_path)
-        elif model_type == "pytorch":
-            import torch
-            return torch.load(model_path)
-        else:
-            raise ValueError(f"Unsupported model type: {model_type}")
-    except Exception as e:
-        logger.error(f"Error loading model from {model_path}: {str(e)}")
-        raise
+# Load model at startup
+if not MODEL_PATH.exists():
+    raise FileNotFoundError(f"Model file not found at {MODEL_PATH.resolve()}")
+titanic_model = joblib.load(MODEL_PATH)
 
-async def load_models():
-    """Load all models on startup"""
-    # Define your models here
-    model_configs = {
-        "classifier_model": {
-            "path": "models/classifier.pkl",
-            "type": "sklearn",
-            "description": "Binary classification model"
-        },
-        "regression_model": {
-            "path": "models/regressor.pkl", 
-            "type": "sklearn",
-            "description": "Regression model for price prediction"
-        }
-        # Add more models as needed
-    }
-    
-    for model_name, config in model_configs.items():
-        model_path = Path(config["path"])
-        if model_path.exists():
-            try:
-                models_cache[model_name] = {
-                    "model": load_model(str(model_path), config["type"]),
-                    "type": config["type"],
-                    "description": config["description"],
-                    "loaded_at": datetime.now().isoformat()
-                }
-                logger.info(f"Successfully loaded {model_name}")
-            except Exception as e:
-                logger.error(f"Failed to load {model_name}: {str(e)}")
-        else:
-            logger.warning(f"Model file not found: {model_path}")
+# Get model metadata
+MODEL_INFO = {
+    "model_type": type(titanic_model.named_steps['classifier']).__name__,
+    "features": titanic_model.named_steps['preprocessor'].transformers_[0][2] \
+              + titanic_model.named_steps['preprocessor'].transformers_[1][2],
+    "model_file": str(MODEL_PATH.resolve()),
+    "file_size_kb": round(os.path.getsize(MODEL_PATH) / 1024, 2),
+    "load_time": datetime.now().isoformat(),
+    "api_version": "1.0.0"
+}
 
-# Lifespan manager for startup/shutdown
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup
-    logger.info("Starting up FastAPI ML service...")
-    await load_models()
-    yield
-    # Shutdown
-    logger.info("Shutting down FastAPI ML service...")
-
-# Initialize FastAPI app
 app = FastAPI(
-    title="ML Model API",
-    description="FastAPI service for machine learning model predictions",
+    title="Titanic Survival Prediction API",
+    description="API to predict Titanic passenger survival using ML model",
     version="1.0.0",
-    lifespan=lifespan
 )
 
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Configure this for production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# -------------------------
+# Data models
+# -------------------------
 
-# Pydantic models for request/response
-class PredictionRequest(BaseModel):
-    """Generic prediction request"""
-    features: Union[List[float], Dict[str, Any], List[Dict[str, Any]]]
-    model_name: str = Field(..., description="Name of the model to use")
+class Person(BaseModel):
+    pclass: int = Field(..., ge=1, le=3, description="Passenger class (1, 2, or 3)")
+    sex: str = Field(..., description="Gender (male or female)")
+    age: float = Field(..., ge=0, le=100, description="Age in years")
+    sibsp: int = Field(..., ge=0, description="Number of siblings/spouses aboard")
+    parch: int = Field(..., ge=0, description="Number of parents/children aboard")
+    fare: float = Field(..., ge=0, description="Passenger fare")
+    embarked: str = Field(..., description="Port of embarkation (C, Q, or S)")
     
     class Config:
         json_schema_extra = {
             "example": {
-                "features": [1.2, 3.4, 5.6, 7.8],
-                "model_name": "classifier_model"
+                "pclass": 3,
+                "sex": "male",
+                "age": 22.0,
+                "sibsp": 1,
+                "parch": 0,
+                "fare": 7.25,
+                "embarked": "S"
             }
         }
 
-class BatchPredictionRequest(BaseModel):
-    """Batch prediction request"""
-    features_batch: List[Union[List[float], Dict[str, Any]]]
-    model_name: str
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "features_batch": [
-                    [1.2, 3.4, 5.6, 7.8],
-                    [2.1, 4.3, 6.5, 8.7]
-                ],
-                "model_name": "classifier_model"
-            }
-        }
 
 class PredictionResponse(BaseModel):
-    """Prediction response"""
-    prediction: Union[float, int, str, List[Union[float, int, str]]]
-    model_name: str
+    survived: bool
+    survival_probability: float
+    person_data: Person
     prediction_time: str
-    confidence: Optional[float] = None
 
-class ModelInfo(BaseModel):
-    """Model information"""
-    name: str
-    type: str
-    description: str
-    loaded_at: str
-    status: str
 
-class HealthResponse(BaseModel):
-    """Health check response"""
-    status: str
-    models_loaded: int
-    timestamp: str
+# -------------------------
+# Endpoints
+# -------------------------
 
-# Utility functions
-def preprocess_features(features: Union[List, Dict, List[Dict]], model_name: str):
-    """Preprocess features based on model requirements"""
-    # Add your preprocessing logic here
-    if isinstance(features, dict):
-        # Convert dict to array if needed
-        return np.array(list(features.values())).reshape(1, -1)
-    elif isinstance(features, list) and len(features) > 0:
-        if isinstance(features[0], dict):
-            # Convert list of dicts to DataFrame
-            df = pd.DataFrame(features)
-            return df.values
-        else:
-            # Convert list to numpy array
-            return np.array(features).reshape(1, -1)
-    else:
-        return np.array(features).reshape(1, -1)
-
-def get_prediction_confidence(model, features):
-    """Get prediction confidence if model supports it"""
+@app.post("/predict", response_model=PredictionResponse)
+async def predict_survival(person: Person):
     try:
-        if hasattr(model, 'predict_proba'):
-            proba = model.predict_proba(features)
-            return float(np.max(proba))
-        elif hasattr(model, 'decision_function'):
-            decision = model.decision_function(features)
-            return float(np.abs(decision[0]) if len(decision) == 1 else np.max(np.abs(decision)))
-    except:
-        pass
-    return None
+        if person.sex.lower() not in ['male', 'female']:
+            raise HTTPException(status_code=400, detail="Sex must be 'male' or 'female'")
+        
+        if person.embarked.upper() not in ['C', 'Q', 'S']:
+            raise HTTPException(status_code=400, detail="Embarked must be 'C', 'Q', or 'S'")
+        
+        input_df = pd.DataFrame([person.dict()])
 
-# API Routes
+        prediction = titanic_model.predict(input_df)[0]
+        prediction_proba = titanic_model.predict_proba(input_df)[0]
 
+        survived = bool(prediction)
+        survival_probability = float(prediction_proba[1])
 
-@app.post('/suma')
-async def suma(a:int, b:int):
-    return {
-        "message": "Esto es una suma",
-        "result": a+b
-    }
-    
+        return PredictionResponse(
+            survived=survived,
+            survival_probability=survival_probability,
+            person_data=person,
+            prediction_time=datetime.now().isoformat()
+        )
+    except Exception as e:
+        logger.error(f"Prediction error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
+
 
 @app.get("/", response_model=Dict[str, str])
 async def root():
-    """Root endpoint"""
     return {
         "message": "ML Model API",
         "version": "1.0.0",
         "docs": "/docs"
     }
 
-@app.get("/health", response_model=HealthResponse)
-async def health_check():
-    """Health check endpoint"""
-    return HealthResponse(
-        status="healthy",
-        models_loaded=len(models_cache),
-        timestamp=datetime.now().isoformat()
-    )
 
-@app.get("/models", response_model=List[ModelInfo])
-async def list_models():
-    """List all available models"""
-    models_info = []
-    for name, info in models_cache.items():
-        models_info.append(ModelInfo(
-            name=name,
-            type=info["type"],
-            description=info["description"],
-            loaded_at=info["loaded_at"],
-            status="loaded"
-        ))
-    return models_info
-
-@app.get("/models/{model_name}", response_model=ModelInfo)
-async def get_model_info(model_name: str):
-    """Get information about a specific model"""
-    if model_name not in models_cache:
-        raise HTTPException(status_code=404, detail=f"Model '{model_name}' not found")
-    
-    info = models_cache[model_name]
-    return ModelInfo(
-        name=model_name,
-        type=info["type"],
-        description=info["description"],
-        loaded_at=info["loaded_at"],
-        status="loaded"
-    )
-
-@app.post("/predict", response_model=PredictionResponse)
-async def predict(request: PredictionRequest):
-    """Make a single prediction"""
-    # Check if model exists
-    if request.model_name not in models_cache:
-        raise HTTPException(
-            status_code=404, 
-            detail=f"Model '{request.model_name}' not found"
-        )
-    
-    try:
-        model_info = models_cache[request.model_name]
-        model = model_info["model"]
-        
-        # Preprocess features
-        processed_features = preprocess_features(request.features, request.model_name)
-        
-        # Make prediction
-        prediction = model.predict(processed_features)
-        
-        # Get confidence if available
-        confidence = get_prediction_confidence(model, processed_features)
-        
-        # Format prediction
-        if isinstance(prediction, np.ndarray):
-            if len(prediction) == 1:
-                prediction = prediction[0]
-            else:
-                prediction = prediction.tolist()
-        
-        return PredictionResponse(
-            prediction=prediction,
-            model_name=request.model_name,
-            prediction_time=datetime.now().isoformat(),
-            confidence=confidence
-        )
-        
-    except Exception as e:
-        logger.error(f"Prediction error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
-
-@app.post("/predict/batch", response_model=PredictionResponse)
-async def predict_batch(request: BatchPredictionRequest):
-    """Make batch predictions"""
-    if request.model_name not in models_cache:
-        raise HTTPException(
-            status_code=404, 
-            detail=f"Model '{request.model_name}' not found"
-        )
-    
-    try:
-        model_info = models_cache[request.model_name]
-        model = model_info["model"]
-        
-        # Process batch features
-        processed_features = []
-        for features in request.features_batch:
-            processed = preprocess_features(features, request.model_name)
-            processed_features.append(processed.flatten())
-        
-        processed_features = np.array(processed_features)
-        
-        # Make batch predictions
-        predictions = model.predict(processed_features)
-        
-        # Convert to list for JSON serialization
-        if isinstance(predictions, np.ndarray):
-            predictions = predictions.tolist()
-        
-        return PredictionResponse(
-            prediction=predictions,
-            model_name=request.model_name,
-            prediction_time=datetime.now().isoformat()
-        )
-        
-    except Exception as e:
-        logger.error(f"Batch prediction error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Batch prediction failed: {str(e)}")
-
-@app.post("/models/{model_name}/reload")
-async def reload_model(model_name: str, background_tasks: BackgroundTasks):
-    """Reload a specific model"""
-    if model_name not in models_cache:
-        raise HTTPException(status_code=404, detail=f"Model '{model_name}' not found")
-    
-    def reload_task():
-        try:
-            # This would need to be implemented based on your model storage
-            logger.info(f"Reloading model: {model_name}")
-            # reload logic here
-        except Exception as e:
-            logger.error(f"Failed to reload {model_name}: {str(e)}")
-    
-    background_tasks.add_task(reload_task)
-    return {"message": f"Model '{model_name}' reload initiated"}
-
-# Custom exception handlers
-@app.exception_handler(ValueError)
-async def value_error_handler(request, exc):
-    return HTTPException(status_code=400, detail=str(exc))
-
-@app.exception_handler(FileNotFoundError)
-async def file_not_found_handler(request, exc):
-    return HTTPException(status_code=404, detail="Model file not found")
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+@app.get("/info", response_model=Dict[str, str])
+async def model_info():
+    """Return information about the loaded model"""
+    return MODEL_INFO
