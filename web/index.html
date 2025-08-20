@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ML Models API — Demo interactiva</title>
+  <style>
+    :root{
+      --bg:#0b1220; --card:#0f1a2b; --muted:#8ea1b2; --text:#f4f7fb;
+      --accent:#5fb3ff; --accent2:#00e6a7; --danger:#ff6b6b; --ok:#68d391;
+      --border:rgba(255,255,255,.08); --shadow:0 10px 30px rgba(0,0,0,.25);
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0; color:var(--text); background:radial-gradient(1200px 600px at 20% -10%, #112542 10%, transparent 60%), radial-gradient(1200px 700px at 120% 10%, #112542 10%, transparent 60%), linear-gradient(180deg,#0a0f1d, #0b1220 50%, #0b1220 100%);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      min-height:100dvh;
+    }
+    header{
+      padding:28px 20px 8px; position:sticky; top:0; backdrop-filter:saturate(160%) blur(14px);
+      background:linear-gradient(180deg, rgba(11,18,32,.85), rgba(11,18,32,.45) 90%, transparent);
+      border-bottom:1px solid var(--border); z-index:5;
+    }
+    h1{margin:0 0 14px; font-weight:800; letter-spacing:.2px}
+    .bar{display:flex; gap:10px; align-items:center; flex-wrap:wrap; color:var(--muted); font-size:14px}
+    .pill{display:inline-flex; align-items:center; gap:6px; padding:8px 10px; border:1px solid var(--border); border-radius:999px; background:rgba(255,255,255,.03)}
+    .pill input{all:unset; color:var(--text); width:280px}
+    .btn{all:unset; padding:8px 12px; background:linear-gradient(135deg, var(--accent), #6fc8ff); color:#001018; font-weight:700; border-radius:999px; cursor:pointer; box-shadow:var(--shadow); transition:transform .1s ease, filter .2s ease}
+    .btn:hover{transform:translateY(-1px)}
+    .btn.ghost{background:none; color:var(--text); border:1px solid var(--border); box-shadow:none}
+    .ok{color:var(--ok)} .bad{color:var(--danger)}
+    main{padding:18px 20px 40px}
+    .grid{display:grid; gap:18px; grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+    .card{
+      background:linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.01));
+      border:1px solid var(--border); border-radius:20px; padding:18px; box-shadow:var(--shadow); position:relative; overflow:hidden;
+      animation:pop .5s ease both;
+    }
+    @keyframes pop{from{transform:translateY(8px); opacity:.0} to{transform:none; opacity:1}}
+    h2{margin:0 0 14px}
+    .row{display:grid; grid-template-columns:1fr 1fr; gap:12px}
+    label{font-size:12px; color:var(--muted)}
+    input, select{
+      width:100%; padding:10px 12px; border-radius:12px; background:#0b1628; color:var(--text); border:1px solid var(--border);
+      outline:none; transition:border-color .2s ease, box-shadow .2s ease;
+    }
+    input:focus, select:focus{border-color:var(--accent); box-shadow:0 0 0 4px rgba(95,179,255,.15)}
+    .actions{display:flex; gap:10px; margin:10px 0 6px}
+    .divider{height:1px; background:var(--border); margin:12px 0}
+    .result{
+      border:1px dashed var(--border); border-radius:14px; padding:12px; background:rgba(255,255,255,.03);
+      min-height:80px; transition:background .2s ease, border-color .2s ease;
+    }
+    .result.active{background:rgba(0,230,167,.04); border-color:rgba(0,230,167,.3)}
+    .badge{
+      display:inline-flex; gap:6px; align-items:center; padding:6px 10px; border-radius:999px;
+      background:rgba(0,230,167,.12); color:var(--accent2); font-weight:700; font-size:12px; border:1px solid rgba(0,230,167,.35);
+      transform-origin:left; animation:badgeIn .35s ease both;
+    }
+    @keyframes badgeIn{from{transform:scale(.92);opacity:0} to{transform:scale(1);opacity:1}}
+
+    /* prob bars */
+    .probs{display:flex; flex-direction:column; gap:10px; margin-top:10px}
+    .prob{display:grid; grid-template-columns:120px 1fr 60px; gap:10px; align-items:center}
+    .prob label{color:var(--muted)}
+    .barWrap{height:12px; background:#0a1322; border-radius:999px; border:1px solid var(--border); overflow:hidden}
+    .bar{height:100%; width:0%; background:linear-gradient(90deg, var(--accent2), #77ffd9); transition:width .6s cubic-bezier(.2,.7,.2,1)}
+    .bar.pred{background:linear-gradient(90deg, #ffd166, #ff8c00)}
+    .perc{text-align:right; font-variant-numeric:tabular-nums}
+
+    /* loader button */
+    .btn[aria-busy="true"]{pointer-events:none; filter:saturate(.5) brightness(.9)}
+    .btn[aria-busy="true"]::after{
+      content:""; width:14px; height:14px; margin-left:8px; border-radius:50%;
+      border:2px solid rgba(0,0,0,.2); border-top-color:rgba(0,0,0,.7);
+      display:inline-block; animation:spin .7s linear infinite; vertical-align:-2px;
+    }
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    /* toast */
+    .toast{position:fixed; right:16px; bottom:16px; background:#0f1a2b; color:var(--text); padding:12px 14px; border:1px solid var(--border); border-radius:12px; box-shadow:var(--shadow); opacity:0; transform:translateY(10px); transition:all .25s ease; z-index:40}
+    .toast.show{opacity:1; transform:none}
+    .toast.ok{border-color:rgba(0,230,167,.4)}
+    .toast.bad{border-color:rgba(255,107,107,.4)}
+
+    /* confetti (simple) */
+    .confetti{
+      position:fixed; top:-10px; width:8px; height:14px; background:var(--accent);
+      left:0; animation:fall 1.4s linear forwards; opacity:.9; z-index:30;
+      transform:rotate(20deg);
+    }
+    @keyframes fall{
+      to{transform:translateY(110vh) rotate(720deg)}
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ML Models API — Frontend mínimo</h1>
+    <div class="bar">
+      <span>Backend base:</span>
+      <span class="pill">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M3 5h18M3 12h18M3 19h18" stroke="#90caf9" stroke-width="2" stroke-linecap="round"/></svg>
+        <input id="baseUrlInput" placeholder="http://127.0.0.1:3000"/>
+      </span>
+      <button id="saveBase" class="btn">Guardar</button>
+      <button id="ping" class="btn ghost">Probar /health</button>
+      <span>· Salud: <strong id="health" class="bad">sin conexión</strong></span>
+    </div>
+  </header>
+
+  <main>
+    <div class="grid">
+
+      <!-- IRIS -->
+      <section class="card" id="card-iris">
+        <h2>Iris</h2>
+        <form id="form-iris">
+          <div class="row">
+            <div><label>sepal_length</label><input name="sepal_length" type="text" inputmode="decimal" value="5,1" required></div>
+            <div><label>sepal_width</label><input name="sepal_width"  type="text" inputmode="decimal" value="3,5" required></div>
+            <div><label>petal_length</label><input name="petal_length" type="text" inputmode="decimal" value="1,4" required></div>
+            <div><label>petal_width</label><input name="petal_width"  type="text" inputmode="decimal" value="0,2" required></div>
+          </div>
+          <div class="actions">
+            <button class="btn" id="btn-iris">Predecir</button>
+            <span class="badge" id="badge-iris" style="display:none"></span>
+          </div>
+        </form>
+        <div class="divider"></div>
+        <div class="result" id="out-iris">—</div>
+      </section>
+
+      <!-- TITANIC -->
+      <section class="card" id="card-titanic">
+        <h2>Titanic</h2>
+        <form id="form-titanic">
+          <div class="row">
+            <div><label>pclass</label>
+              <select name="pclass"><option>1</option><option>2</option><option selected>3</option></select></div>
+            <div><label>sex</label>
+              <select name="sex"><option>male</option><option>female</option></select></div>
+            <div><label>age</label><input name="age" type="text" inputmode="decimal" value="29" required></div>
+            <div><label>sibsp</label><input name="sibsp" type="text" inputmode="numeric" value="0" required></div>
+            <div><label>parch</label><input name="parch" type="text" inputmode="numeric" value="0" required></div>
+            <div><label>fare</label><input name="fare" type="text" inputmode="decimal" value="100" required></div>
+            <div><label>embarked</label>
+              <select name="embarked"><option>C</option><option>Q</option><option selected>S</option></select></div>
+          </div>
+          <div class="actions">
+            <button class="btn" id="btn-titanic">Predecir</button>
+            <span class="badge" id="badge-titanic" style="display:none"></span>
+          </div>
+        </form>
+        <div class="divider"></div>
+        <div class="result" id="out-titanic">—</div>
+      </section>
+
+      <!-- PENGUINS -->
+      <section class="card" id="card-penguins">
+        <h2>Penguins</h2>
+        <form id="form-penguins">
+          <div class="row">
+            <div><label>island</label>
+              <select name="island"><option selected>Torgersen</option><option>Biscoe</option><option>Dream</option></select></div>
+            <div><label>sex</label>
+              <select name="sex"><option>male</option><option>female</option></select></div>
+            <div><label>culmen_length_mm</label><input name="culmen_length_mm" type="text" inputmode="decimal" value="39,1" required></div>
+            <div><label>culmen_depth_mm</label><input name="culmen_depth_mm" type="text"  inputmode="decimal" value="18,7" required></div>
+            <div><label>flipper_length_mm</label><input name="flipper_length_mm" type="text" inputmode="numeric" value="181" required></div>
+            <div><label>body_mass_g</label><input name="body_mass_g" type="text" inputmode="numeric" value="3750" required></div>
+          </div>
+          <div class="actions">
+            <button class="btn" id="btn-penguins">Predecir</button>
+            <span class="badge" id="badge-penguins" style="display:none"></span>
+          </div>
+        </form>
+        <div class="divider"></div>
+        <div class="result" id="out-penguins">—</div>
+      </section>
+
+    </div>
+  </main>
+
+  <div id="toast" class="toast">Mensaje</div>
+
+  <script>
+    // ===== Base URL (editable + persistente) =====
+    const defaultBase = (window.location.port === "5173")
+      ? "http://3.81.62.129:3000"     // servidor simple http.server
+      : window.location.origin;     // servido por FastAPI
+    const BASE_URL = { value: localStorage.getItem("baseUrl") || defaultBase };
+    const baseInput = document.getElementById("baseUrlInput");
+    const healthEl = document.getElementById("health");
+    baseInput.value = BASE_URL.value;
+    document.getElementById("saveBase").onclick = () => {
+      BASE_URL.value = baseInput.value.trim();
+      localStorage.setItem("baseUrl", BASE_URL.value);
+      document.getElementById("baseUrlInput").classList.add("saved");
+      showToast("URL base guardada", true);
+      pingHealth();
+    };
+    document.getElementById("ping").onclick = () => pingHealth();
+
+    // ===== Utilidades =====
+    const toNumber = v => {
+      if (v == null) return undefined;
+      const n = Number(String(v).trim().replace(',', '.'));
+      return Number.isFinite(n) ? n : undefined;
+    };
+
+    async function postJSON(path, data) {
+      const res = await fetch(`${BASE_URL.value}${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      const text = await res.text();
+      try { return { ok: res.ok, json: JSON.parse(text) }; }
+      catch { return { ok: res.ok, json: { raw: text } }; }
+    }
+
+    async function getJSON(path) {
+      const res = await fetch(`${BASE_URL.value}${path}`);
+      if (!res.ok) throw new Error(res.statusText);
+      return res.json();
+    }
+
+    function showToast(msg, ok=true){
+      const el = document.getElementById("toast");
+      el.textContent = msg;
+      el.classList.toggle("ok", ok);
+      el.classList.toggle("bad", !ok);
+      el.classList.add("show");
+      setTimeout(()=>el.classList.remove("show"), 2200);
+    }
+
+    function setBusy(btn, busy){
+      btn.setAttribute("aria-busy", busy ? "true" : "false");
+    }
+
+    function confettiBurst(){
+      const colors = ["#5fb3ff","#77ffd9","#ffd166","#ff9aa2","#c3f584","#b28dff"];
+      for(let i=0;i<80;i++){
+        const c = document.createElement("div");
+        c.className="confetti";
+        c.style.left = (Math.random()*100)+"vw";
+        c.style.background = colors[Math.floor(Math.random()*colors.length)];
+        c.style.animationDuration = (1 + Math.random()*1.2)+"s";
+        c.style.transform = `rotate(${Math.random()*360}deg)`;
+        document.body.appendChild(c);
+        setTimeout(()=>c.remove(), 1800);
+      }
+    }
+
+    function clearNode(el){ while(el.firstChild) el.removeChild(el.firstChild); }
+
+    // Render de probabilidades con barras animadas
+    function renderProbs(container, probs, labels, predictedIndex){
+      clearNode(container);
+      const wrap = document.createElement("div"); wrap.className = "probs";
+      probs.forEach((p,i)=>{
+        const row = document.createElement("div"); row.className="prob";
+        const lab = document.createElement("label"); lab.textContent = labels?.[i] ?? `class ${i}`;
+        const barWrap = document.createElement("div"); barWrap.className="barWrap";
+        const bar = document.createElement("div"); bar.className="bar"; if(i===predictedIndex) bar.classList.add("pred");
+        const perc = document.createElement("div"); perc.className="perc"; perc.textContent = (p*100).toFixed(1)+"%";
+        barWrap.appendChild(bar);
+        row.append(lab, barWrap, perc);
+        wrap.appendChild(row);
+        requestAnimationFrame(()=>{ bar.style.width = (p*100).toFixed(2)+"%"; });
+      });
+      container.appendChild(wrap);
+    }
+
+    function activateResult(cardId, badgeId, label, success=true){
+      const card = document.getElementById(cardId);
+      const badge = document.getElementById(badgeId);
+      const out = card.querySelector(".result");
+      out.classList.add("active");
+      badge.style.display = "inline-flex";
+      badge.textContent = label;
+      if (success) confettiBurst();
+    }
+
+    // ===== Metadata (para labels de clases si el backend las expone) =====
+    const meta = { iris:null, titanic:null, penguins:null };
+    async function loadMetadata(){
+      try { meta.iris = await getJSON("/metadata/iris"); } catch{}
+      try { meta.titanic = await getJSON("/metadata/titanic"); } catch{}
+      try { meta.penguins = await getJSON("/metadata/penguins"); } catch{}
+    }
+
+    async function pingHealth(){
+      try{
+        const r = await getJSON("/health");
+        healthEl.textContent = "ok"; healthEl.className="ok";
+        showToast("Backend OK", true);
+        await loadMetadata();
+      }catch(e){
+        healthEl.textContent = "sin conexión"; healthEl.className="bad";
+        showToast("No se pudo contactar /health", false);
+      }
+    }
+
+    // ===== IRIS =====
+    document.getElementById("form-iris").addEventListener("submit", async (e)=>{
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const payload = {
+        sepal_length: toNumber(fd.get("sepal_length")),
+        sepal_width:  toNumber(fd.get("sepal_width")),
+        petal_length: toNumber(fd.get("petal_length")),
+        petal_width:  toNumber(fd.get("petal_width")),
+      };
+      const btn = document.getElementById("btn-iris"); setBusy(btn, true);
+      const out = document.getElementById("out-iris"); out.textContent = "Consultando…";
+      const { ok, json } = await postJSON("/predict/iris", payload);
+      setBusy(btn, false);
+      if(!ok){ out.textContent = JSON.stringify(json, null, 2); showToast("Error en Iris", false); return; }
+      out.textContent = JSON.stringify(json, null, 2);
+
+      const probs = json.probabilities?.[0] ?? null;
+      if (probs){
+        const labels = meta?.iris?.class_names ?? ["setosa","versicolor","virginica"];
+        const predIdx = labels.indexOf(String(json.prediction));
+        renderProbs(out, probs, labels, predIdx>=0?predIdx:null);
+      }
+      activateResult("card-iris","badge-iris",`Predicción: ${json.prediction}`);
+    });
+
+    // ===== TITANIC =====
+    document.getElementById("form-titanic").addEventListener("submit", async (e)=>{
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const payload = {
+        pclass:   toNumber(fd.get("pclass")),
+        sex:      fd.get("sex"),
+        age:      toNumber(fd.get("age")),
+        sibsp:    toNumber(fd.get("sibsp")),
+        parch:    toNumber(fd.get("parch")),
+        fare:     toNumber(fd.get("fare")),
+        embarked: fd.get("embarked")
+      };
+      const btn = document.getElementById("btn-titanic"); setBusy(btn, true);
+      const out = document.getElementById("out-titanic"); out.textContent = "Consultando…";
+      const { ok, json } = await postJSON("/predict/titanic", payload);
+      setBusy(btn, false);
+      if(!ok){ out.textContent = JSON.stringify(json, null, 2); showToast("Error en Titanic", false); return; }
+      out.textContent = JSON.stringify(json, null, 2);
+
+      const probs = json.probabilities?.[0] ?? null;
+      if (probs && probs.length===2){
+        const labels = meta?.titanic?.class_names ?? ["died (0)","survived (1)"];
+        const predIdx = Number(json.prediction) === 1 ? 1 : 0;
+        renderProbs(out, probs, labels, predIdx);
+      }
+      const tag = Number(json.prediction)===1 ? "Sobrevive" : "No sobrevive";
+      activateResult("card-titanic","badge-titanic",tag);
+    });
+
+    // ===== PENGUINS =====
+    document.getElementById("form-penguins").addEventListener("submit", async (e)=>{
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const payload = {
+        island:             fd.get("island"),
+        sex:                fd.get("sex"),
+        culmen_length_mm:   toNumber(fd.get("culmen_length_mm")),
+        culmen_depth_mm:    toNumber(fd.get("culmen_depth_mm")),
+        flipper_length_mm:  toNumber(fd.get("flipper_length_mm")),
+        body_mass_g:        toNumber(fd.get("body_mass_g")),
+      };
+      const btn = document.getElementById("btn-penguins"); setBusy(btn, true);
+      const out = document.getElementById("out-penguins"); out.textContent = "Consultando…";
+      const { ok, json } = await postJSON("/predict/penguins", payload);
+      setBusy(btn, false);
+      if(!ok){ out.textContent = JSON.stringify(json, null, 2); showToast("Error en Penguins", false); return; }
+      out.textContent = JSON.stringify(json, null, 2);
+
+      const probs = json.probabilities?.[0] ?? null;
+      if (probs){
+        const labels = meta?.penguins?.class_names ?? ["Adelie","Chinstrap","Gentoo"];
+        const predIdx = labels.indexOf(String(json.prediction));
+        renderProbs(out, probs, labels, predIdx>=0?predIdx:null);
+      }
+      activateResult("card-penguins","badge-penguins",`Predicción: ${json.prediction}`);
+    });
+
+    // init
+    pingHealth();
+  </script>
+</body>
+</html>
